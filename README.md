@@ -155,3 +155,5 @@ Run the CLI directly:
 ```bash
 go run ./cmd/authbear --help
 ```
+
+Release automation notes are in `docs/RELEASING.md`.
