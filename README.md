@@ -154,6 +154,18 @@ Key names:
 - OAuth access tokens are refreshed automatically when near expiry.
 - Avoid printing raw tokens in logs and scripts unless necessary.
 
+## How this differs from curl
+
+`curl` is a general-purpose HTTP client. `authbear` is an auth-aware API CLI built for repeated authenticated calls.
+
+- `curl` requires you to pass tokens/headers each time; `authbear` stores credentials in keychain per profile.
+- `curl` has no token lifecycle management; `authbear` can refresh OAuth device tokens automatically.
+- `curl` has no profile model; `authbear` keeps reusable named profiles (`base_url`, auth type, auth settings).
+- `curl` has no built-in health checks; `authbear health` supports expected status checks and JSON output.
+- `curl` returns raw responses by default; `authbear call --response-json` returns a structured envelope for automation.
+
+Use `curl` when you need maximum low-level flexibility. Use `authbear` when you want secure, repeatable authenticated API workflows.
+
 ## Development
 
 Run tests:
