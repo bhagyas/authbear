@@ -29,6 +29,13 @@ Optional local install:
 go install ./cmd/authbear
 ```
 
+Install with Homebrew (tap):
+
+```bash
+brew tap bhagyas/authbear
+brew install authbear
+```
+
 ## Quickstart
 
 ### 1) Create a profile
