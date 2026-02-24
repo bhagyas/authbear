@@ -19,6 +19,7 @@ const (
 type Profile struct {
 	Name          string   `json:"name"`
 	BaseURL       string   `json:"base_url,omitempty"`
+	HealthPath    string   `json:"health_path,omitempty"`
 	AuthType      string   `json:"auth_type"`
 	APIKeyHeader  string   `json:"api_key_header,omitempty"`
 	TokenURL      string   `json:"token_url,omitempty"`

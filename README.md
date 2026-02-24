@@ -107,6 +107,17 @@ authbear call my-idp GET /v1/items \
   --header "X-Tenant: acme" \
   --query "limit=20" \
   --query "sort=created_at"
+
+# Machine-readable call output
+authbear call github GET /user --response-json
+```
+
+Health check example:
+
+```bash
+authbear health github
+authbear health github --path /rate_limit --expect 200 --timeout 5
+authbear health github --json
 ```
 
 ## Commands
@@ -118,6 +129,7 @@ authbear call my-idp GET /v1/items \
 - `authbear login <name> [--client-secret ...]`
 - `authbear token <name>`
 - `authbear call <name> <METHOD> <path-or-url> [flags]`
+- `authbear health <name> [flags]`
 - `authbear logout <name>`
 - `authbear doctor`
 

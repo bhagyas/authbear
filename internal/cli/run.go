@@ -57,6 +57,8 @@ func Run(args []string) int {
 		return runToken(args[1:], s)
 	case "call":
 		return runCall(args[1:], s)
+	case "health":
+		return runHealth(args[1:], s)
 	case "logout":
 		return runLogout(args[1:], s)
 	case "doctor":
@@ -88,6 +90,7 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 		fs := flag.NewFlagSet("profile add", flag.ContinueOnError)
 		fs.SetOutput(io.Discard)
 		baseURL := fs.String("base-url", "", "Base URL for API requests")
+		healthPath := fs.String("health-path", "", "Default health endpoint path")
 		authType := fs.String("auth-type", config.AuthTypeBearer, "Auth type: bearer|api-key|oauth-device")
 		apiKeyHeader := fs.String("api-key-header", "X-API-Key", "Header name for api-key auth")
 		tokenURL := fs.String("token-url", "", "OAuth token URL")
@@ -103,6 +106,7 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 		p := config.Profile{
 			Name:          name,
 			BaseURL:       strings.TrimRight(strings.TrimSpace(*baseURL), "/"),
+			HealthPath:    strings.TrimSpace(*healthPath),
 			AuthType:      strings.TrimSpace(*authType),
 			APIKeyHeader:  strings.TrimSpace(*apiKeyHeader),
 			TokenURL:      strings.TrimSpace(*tokenURL),
@@ -345,6 +349,7 @@ func runCall(args []string, s *config.Store) int {
 	jsonBody := fs.String("json", "", "JSON body string")
 	dataPath := fs.String("data", "", "Read request body from file")
 	rawOut := fs.Bool("raw", false, "Raw response output")
+	responseJSON := fs.Bool("response-json", false, "Print machine-readable response envelope as JSON")
 	withStatus := fs.Bool("status", false, "Print status and response headers")
 	timeoutSec := fs.Int("timeout", 30, "Request timeout in seconds")
 
@@ -401,12 +406,14 @@ func runCall(args []string, s *config.Store) int {
 	}
 
 	hc := &http.Client{Timeout: time.Duration(*timeoutSec) * time.Second}
+	started := time.Now()
 	resp, err := hc.Do(req)
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "error: request failed: %v\n", err)
 		return 1
 	}
 	defer resp.Body.Close()
+	latency := time.Since(started)
 
 	if *withStatus {
 		fmt.Printf("HTTP %d %s\n", resp.StatusCode, resp.Status)
@@ -424,6 +431,34 @@ func runCall(args []string, s *config.Store) int {
 		return 1
 	}
 
+	if *responseJSON {
+		payload := map[string]any{
+			"ok":          resp.StatusCode < 400,
+			"method":      method,
+			"url":         fullURL,
+			"status_code": resp.StatusCode,
+			"status":      resp.Status,
+			"latency_ms":  latency.Round(time.Millisecond).Milliseconds(),
+			"headers":     resp.Header,
+		}
+
+		var parsed any
+		if err := json.Unmarshal(b, &parsed); err == nil {
+			payload["body_json"] = parsed
+		} else {
+			payload["body_text"] = string(b)
+		}
+
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(payload)
+
+		if resp.StatusCode >= 400 {
+			return 1
+		}
+		return 0
+	}
+
 	if *rawOut {
 		fmt.Print(string(b))
 	} else {
@@ -437,6 +472,161 @@ func runCall(args []string, s *config.Store) int {
 
 	if resp.StatusCode >= 400 {
 		return 1
+	}
+	return 0
+}
+
+func runHealth(args []string, s *config.Store) int {
+	if len(args) < 1 {
+		fmt.Fprintln(os.Stderr, "error: usage authbear health <profile> [flags]")
+		return 1
+	}
+
+	profileName := args[0]
+	p, ok := s.Profiles[profileName]
+	if !ok {
+		fmt.Fprintf(os.Stderr, "error: profile %q not found\n", profileName)
+		return 1
+	}
+
+	defaultPath := p.HealthPath
+	if strings.TrimSpace(defaultPath) == "" {
+		defaultPath = "/health"
+	}
+
+	fs := flag.NewFlagSet("health", flag.ContinueOnError)
+	fs.SetOutput(io.Discard)
+	path := fs.String("path", defaultPath, "Health path or absolute URL")
+	expect := fs.Int("expect", 200, "Expected status code")
+	timeoutSec := fs.Int("timeout", 5, "Request timeout in seconds")
+	noAuth := fs.Bool("no-auth", false, "Skip auth headers")
+	jsonOut := fs.Bool("json", false, "Print machine-readable JSON output")
+	var headers multiFlag
+	var queries multiFlag
+	fs.Var(&headers, "header", "Header in 'Key: Value' format (repeatable)")
+	fs.Var(&queries, "query", "Query in 'key=value' format (repeatable)")
+
+	if err := fs.Parse(args[1:]); err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	fullURL, err := buildURL(p.BaseURL, *path, queries)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: %v\n", err)
+		return 1
+	}
+
+	req, err := http.NewRequest(http.MethodGet, fullURL, nil)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "error: build request: %v\n", err)
+		return 1
+	}
+
+	for _, h := range headers {
+		parts := strings.SplitN(h, ":", 2)
+		if len(parts) != 2 {
+			fmt.Fprintf(os.Stderr, "error: invalid --header format %q\n", h)
+			return 1
+		}
+		req.Header.Add(strings.TrimSpace(parts[0]), strings.TrimSpace(parts[1]))
+	}
+
+	if !*noAuth {
+		authHeaderValue, _, err := getAuthHeaderValue(p)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+
+		if p.AuthType == config.AuthTypeAPIKey {
+			headerName := p.APIKeyHeader
+			if headerName == "" {
+				headerName = "X-API-Key"
+			}
+			req.Header.Set(headerName, authHeaderValue)
+		} else {
+			req.Header.Set("Authorization", authHeaderValue)
+		}
+	}
+
+	hc := &http.Client{Timeout: time.Duration(*timeoutSec) * time.Second}
+	started := time.Now()
+	resp, err := hc.Do(req)
+	latency := time.Since(started)
+	latencyMs := latency.Round(time.Millisecond).Milliseconds()
+
+	type healthResult struct {
+		OK           bool   `json:"ok"`
+		Profile      string `json:"profile"`
+		URL          string `json:"url"`
+		ExpectedCode int    `json:"expected_code"`
+		StatusCode   int    `json:"status_code,omitempty"`
+		LatencyMs    int64  `json:"latency_ms"`
+		Error        string `json:"error,omitempty"`
+		Body         string `json:"body,omitempty"`
+	}
+
+	if err != nil {
+		if *jsonOut {
+			res := healthResult{
+				OK:           false,
+				Profile:      profileName,
+				URL:          fullURL,
+				ExpectedCode: *expect,
+				LatencyMs:    latencyMs,
+				Error:        err.Error(),
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(res)
+		} else {
+			fmt.Printf("unhealthy %s (%s): request failed: %v\n", fullURL, latency.Round(time.Millisecond), err)
+		}
+		return 1
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != *expect {
+		body, _ := io.ReadAll(io.LimitReader(resp.Body, 400))
+		snippet := strings.TrimSpace(string(body))
+		if *jsonOut {
+			res := healthResult{
+				OK:           false,
+				Profile:      profileName,
+				URL:          fullURL,
+				ExpectedCode: *expect,
+				StatusCode:   resp.StatusCode,
+				LatencyMs:    latencyMs,
+				Body:         snippet,
+			}
+			enc := json.NewEncoder(os.Stdout)
+			enc.SetIndent("", "  ")
+			_ = enc.Encode(res)
+		} else {
+			if snippet != "" {
+				fmt.Printf("unhealthy %s (%s): got %d expected %d; body: %s\n", fullURL, latency.Round(time.Millisecond), resp.StatusCode, *expect, snippet)
+			} else {
+				fmt.Printf("unhealthy %s (%s): got %d expected %d\n", fullURL, latency.Round(time.Millisecond), resp.StatusCode, *expect)
+			}
+		}
+		return 1
+	}
+
+	if *jsonOut {
+		res := healthResult{
+			OK:           true,
+			Profile:      profileName,
+			URL:          fullURL,
+			ExpectedCode: *expect,
+			StatusCode:   resp.StatusCode,
+			LatencyMs:    latencyMs,
+		}
+		enc := json.NewEncoder(os.Stdout)
+		enc.SetIndent("", "  ")
+		_ = enc.Encode(res)
+	} else {
+		fmt.Printf("healthy %s (%s): %d\n", fullURL, latency.Round(time.Millisecond), resp.StatusCode)
 	}
 	return 0
 }
@@ -664,6 +854,7 @@ Commands:
   token <profile>               Print Authorization header value (or api key)
   call <profile> <METHOD> <url-or-path> [flags]
                                 Call an endpoint with profile auth
+  health <profile> [flags]      Check health endpoint with optional auth
   logout <profile>              Remove credentials from keychain
   doctor                        Validate config path and keychain access
 
@@ -671,6 +862,7 @@ Examples:
   authbear profile add github --base-url https://api.github.com --auth-type bearer
   authbear login github
   authbear call github GET /user
+  authbear health github --path /health
 `)
 }
 
@@ -685,6 +877,7 @@ Usage:
 
 Flags for add:
   --base-url         API base URL
+  --health-path      Default health endpoint path
   --auth-type        bearer|api-key|oauth-device
   --api-key-header   Header name for api-key auth (default X-API-Key)
   --token-url        OAuth token URL (oauth-device)

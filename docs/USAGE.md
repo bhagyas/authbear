@@ -11,6 +11,7 @@ authbear profile add <name> [flags]
 Flags:
 
 - `--base-url` API base URL used by `call` when path is relative
+- `--health-path` default path used by `health` (default runtime fallback is `/health`)
 - `--auth-type` `bearer`, `api-key`, or `oauth-device`
 - `--api-key-header` header name used for `api-key` auth (default `X-API-Key`)
 - `--device-code-url` OAuth device authorization endpoint
@@ -73,6 +74,7 @@ Flags:
 - `--json '{...}'` inline JSON body
 - `--data <file>` request body from file
 - `--raw` do not pretty-print JSON response
+- `--response-json` print machine-readable response envelope as JSON
 - `--status` print status line and response headers
 - `--timeout <seconds>` request timeout (default `30`)
 
@@ -81,6 +83,26 @@ Auth behavior:
 - `bearer` and `oauth-device`: injects `Authorization` header
 - `api-key`: injects configured API key header
 - `oauth-device`: refreshes access token automatically if near expiry
+
+## health
+
+Check an endpoint health/readiness with optional auth.
+
+```bash
+authbear health <name> [flags]
+```
+
+Flags:
+
+- `--path /health` endpoint path or absolute URL
+- `--expect 200` expected status code
+- `--timeout 5` request timeout seconds
+- `--no-auth` skip auth header injection
+- `--json` print machine-readable JSON output
+- `--header "Key: Value"` repeatable
+- `--query "key=value"` repeatable
+
+Exit code is `0` when status matches `--expect`, else `1`.
 
 ## logout
 
