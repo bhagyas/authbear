@@ -1,6 +1,6 @@
-# authbear
+# authbear 🐻
 
-`authbear` is a local CLI auth broker for API tooling. 🐻
+`authbear` is a local CLI auth broker for API tooling.
 
 It manages credentials for multiple services and stores secrets in your OS keychain, then uses those credentials to call endpoints directly from the CLI.
 
