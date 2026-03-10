@@ -19,6 +19,7 @@ Flags:
 - `--client-id` OAuth client id
 - `--scopes` comma-separated OAuth scopes
 - `--audience` OAuth audience (if required by provider)
+- `--env KEY=VALUE` plain (non-secret) env var attached to the profile (repeatable)
 
 ## profile list / show / remove
 
@@ -110,6 +111,58 @@ Delete stored credentials for a profile from keychain.
 
 ```bash
 authbear logout <name>
+```
+
+## env
+
+Manage environment variables attached to a profile and export them to the shell.
+
+Profiles support two kinds of env vars:
+
+- **Plain** — stored in `profiles.json` alongside other profile config. Set via `profile add --env KEY=VALUE`. Suitable for non-sensitive values like `API_VERSION`, `REGION`, etc.
+- **Secret** — stored in the OS keychain. Set via `env set`. Suitable for sensitive values like API keys or tokens used by other tools (e.g. `REVENUECAT_API_KEY`, `STRIPE_SECRET_KEY`).
+
+### env set
+
+Store a secret env var for a profile in keychain (prompts for the value):
+
+```bash
+authbear env set <profile> <KEY>
+```
+
+Example:
+
+```bash
+authbear env set myprofile REVENUECAT_API_KEY
+```
+
+### env unset
+
+Remove a secret env var from keychain:
+
+```bash
+authbear env unset <profile> <KEY>
+```
+
+### env \<profile\>
+
+Print `export KEY=VALUE` lines for all env vars (plain + secret) attached to a profile:
+
+```bash
+authbear env <profile>
+```
+
+Use with `eval` to load them into the current shell session:
+
+```bash
+eval $(authbear env myprofile)
+```
+
+Or source into a script:
+
+```bash
+eval $(authbear env myprofile)
+curl -H "Authorization: Bearer $REVENUECAT_API_KEY" https://api.revenuecat.com/v1/subscribers/...
 ```
 
 ## doctor

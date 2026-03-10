@@ -14,6 +14,7 @@ It manages credentials for multiple services and stores secrets in your OS keych
   - `oauth-device` (OAuth 2.0 device authorization grant)
 - Automatic OAuth token refresh when calling APIs
 - Built-in API caller with headers/query/body options
+- Per-profile env vars — plain config or keychain-backed secrets, exportable via `eval $(authbear env <profile>)`
 
 ## Install
 
@@ -131,9 +132,30 @@ authbear health github --json
 - `authbear call <name> <METHOD> <path-or-url> [flags]`
 - `authbear health <name> [flags]`
 - `authbear logout <name>`
+- `authbear env <profile>`
+- `authbear env set <profile> <KEY>`
+- `authbear env unset <profile> <KEY>`
 - `authbear doctor`
 
 See full command docs in `docs/USAGE.md`.
+
+## Environment variables
+
+Attach env vars to a profile and load them into your shell with `eval`:
+
+```bash
+# Plain (non-sensitive) — stored in profiles.json
+authbear profile add myprofile --base-url https://api.example.com --auth-type bearer \
+  --env API_VERSION=v2 \
+  --env REGION=us-east-1
+
+# Secret — stored in keychain, prompts for value
+authbear env set myprofile REVENUECAT_API_KEY
+
+# Export all env vars for the profile
+eval $(authbear env myprofile)
+echo $REVENUECAT_API_KEY
+```
 
 ## Storage model
 
@@ -146,6 +168,7 @@ Key names:
 - `profile:<name>:api-key`
 - `profile:<name>:oauth`
 - `profile:<name>:client-secret`
+- `profile:<name>:env:<KEY>`
 
 ## Security notes
 
