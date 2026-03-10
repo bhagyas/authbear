@@ -11,6 +11,7 @@ import (
 	"net/url"
 	"os"
 	"path/filepath"
+	"sort"
 	"strings"
 	"time"
 
@@ -61,6 +62,8 @@ func Run(args []string) int {
 		return runHealth(args[1:], s)
 	case "logout":
 		return runLogout(args[1:], s)
+	case "env":
+		return runEnv(args[1:], cfgPath, s)
 	case "doctor":
 		return runDoctor()
 	case "help", "-h", "--help":
@@ -98,6 +101,8 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 		clientID := fs.String("client-id", "", "OAuth client ID")
 		scopes := fs.String("scopes", "", "Comma-separated OAuth scopes")
 		audience := fs.String("audience", "", "OAuth audience (optional)")
+		var envFlags multiFlag
+		fs.Var(&envFlags, "env", "Env var in KEY=VALUE format (repeatable; for secrets use `authbear env set`)")
 		if err := fs.Parse(args[2:]); err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
 			return 1
@@ -121,6 +126,17 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 					p.Scopes = append(p.Scopes, item)
 				}
 			}
+		}
+		for _, kv := range envFlags {
+			parts := strings.SplitN(kv, "=", 2)
+			if len(parts) != 2 || strings.TrimSpace(parts[0]) == "" {
+				fmt.Fprintf(os.Stderr, "error: invalid --env format %q, expected KEY=VALUE\n", kv)
+				return 1
+			}
+			if p.Env == nil {
+				p.Env = map[string]string{}
+			}
+			p.Env[strings.TrimSpace(parts[0])] = parts[1]
 		}
 
 		if err := config.ValidateProfile(p); err != nil {
@@ -656,6 +672,117 @@ func runLogout(args []string, s *config.Store) int {
 	return 0
 }
 
+func runEnv(args []string, cfgPath string, s *config.Store) int {
+	if len(args) == 0 {
+		printEnvHelp()
+		return 0
+	}
+
+	switch args[0] {
+	case "set":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "error: usage authbear env set <profile> <KEY>")
+			return 1
+		}
+		name, key := args[1], args[2]
+		p, ok := s.Profiles[name]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: profile %q not found\n", name)
+			return 1
+		}
+		val, err := promptHidden(key + ": ")
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		if err := secret.Set(envKey(name, key), val); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		// Track the key name in the profile so env export knows to fetch it.
+		for _, k := range p.SecretEnv {
+			if k == key {
+				fmt.Printf("secret env %q updated for profile %q\n", key, name)
+				return 0
+			}
+		}
+		p.SecretEnv = append(p.SecretEnv, key)
+		sort.Strings(p.SecretEnv)
+		s.Profiles[name] = p
+		if err := config.Save(cfgPath, s); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("secret env %q stored for profile %q\n", key, name)
+		return 0
+
+	case "unset":
+		if len(args) < 3 {
+			fmt.Fprintln(os.Stderr, "error: usage authbear env unset <profile> <KEY>")
+			return 1
+		}
+		name, key := args[1], args[2]
+		p, ok := s.Profiles[name]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: profile %q not found\n", name)
+			return 1
+		}
+		_ = secret.Delete(envKey(name, key))
+		newKeys := p.SecretEnv[:0]
+		for _, k := range p.SecretEnv {
+			if k != key {
+				newKeys = append(newKeys, k)
+			}
+		}
+		p.SecretEnv = newKeys
+		if len(p.SecretEnv) == 0 {
+			p.SecretEnv = nil
+		}
+		s.Profiles[name] = p
+		if err := config.Save(cfgPath, s); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		fmt.Printf("secret env %q removed from profile %q\n", key, name)
+		return 0
+
+	default:
+		// Treat the first arg as a profile name: print export lines.
+		name := args[0]
+		p, ok := s.Profiles[name]
+		if !ok {
+			fmt.Fprintf(os.Stderr, "error: profile %q not found\n", name)
+			return 1
+		}
+
+		// Plain env vars from config.
+		plainKeys := make([]string, 0, len(p.Env))
+		for k := range p.Env {
+			plainKeys = append(plainKeys, k)
+		}
+		sort.Strings(plainKeys)
+		for _, k := range plainKeys {
+			fmt.Printf("export %s=%s\n", k, shellQuote(p.Env[k]))
+		}
+
+		// Secret env vars from keychain.
+		for _, k := range p.SecretEnv {
+			val, err := secret.Get(envKey(name, k))
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "error: secret env %q not found in keychain for profile %q\n", k, name)
+				return 1
+			}
+			fmt.Printf("export %s=%s\n", k, shellQuote(val))
+		}
+		return 0
+	}
+}
+
+// shellQuote wraps a value in single quotes, escaping any single quotes within.
+func shellQuote(s string) string {
+	return "'" + strings.ReplaceAll(s, "'", "'\\''") + "'"
+}
+
 func runDoctor() int {
 	path, err := config.DefaultPath()
 	if err != nil {
@@ -841,6 +968,7 @@ func bearerKey(name string) string       { return "profile:" + name + ":bearer" 
 func apiKeyKey(name string) string       { return "profile:" + name + ":api-key" }
 func oauthTokenKey(name string) string   { return "profile:" + name + ":oauth" }
 func clientSecretKey(name string) string { return "profile:" + name + ":client-secret" }
+func envKey(profile, key string) string  { return "profile:" + profile + ":env:" + key }
 
 func printRootHelp() {
 	fmt.Print(`authbear - auth manager and API caller
@@ -856,6 +984,9 @@ Commands:
                                 Call an endpoint with profile auth
   health <profile> [flags]      Check health endpoint with optional auth
   logout <profile>              Remove credentials from keychain
+  env <profile>                 Print export statements for all env vars
+  env set <profile> <KEY>       Store a secret env var in keychain
+  env unset <profile> <KEY>     Remove a secret env var from keychain
   doctor                        Validate config path and keychain access
 
 Examples:
@@ -863,6 +994,8 @@ Examples:
   authbear login github
   authbear call github GET /user
   authbear health github --path /health
+  authbear env set myprofile REVENUECAT_API_KEY
+  eval $(authbear env myprofile)
 `)
 }
 
@@ -885,5 +1018,23 @@ Flags for add:
   --client-id        OAuth client ID (oauth-device)
   --scopes           Comma-separated OAuth scopes
   --audience         OAuth audience (optional)
+  --env KEY=VALUE    Plain (non-secret) env var (repeatable)
+`)
+}
+
+func printEnvHelp() {
+	fmt.Print(`authbear env - manage environment variables for a profile
+
+Usage:
+  authbear env <profile>              Print export statements for all env vars
+  authbear env set <profile> <KEY>    Store a secret env var in keychain (prompts for value)
+  authbear env unset <profile> <KEY>  Remove a secret env var from keychain
+
+Non-secret env vars are set via 'authbear profile add --env KEY=VALUE'.
+
+Examples:
+  authbear env set myprofile REVENUECAT_API_KEY
+  authbear env myprofile
+  eval $(authbear env myprofile)
 `)
 }

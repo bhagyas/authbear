@@ -17,16 +17,18 @@ const (
 )
 
 type Profile struct {
-	Name          string   `json:"name"`
-	BaseURL       string   `json:"base_url,omitempty"`
-	HealthPath    string   `json:"health_path,omitempty"`
-	AuthType      string   `json:"auth_type"`
-	APIKeyHeader  string   `json:"api_key_header,omitempty"`
-	TokenURL      string   `json:"token_url,omitempty"`
-	DeviceCodeURL string   `json:"device_code_url,omitempty"`
-	ClientID      string   `json:"client_id,omitempty"`
-	Scopes        []string `json:"scopes,omitempty"`
-	Audience      string   `json:"audience,omitempty"`
+	Name          string            `json:"name"`
+	BaseURL       string            `json:"base_url,omitempty"`
+	HealthPath    string            `json:"health_path,omitempty"`
+	AuthType      string            `json:"auth_type"`
+	APIKeyHeader  string            `json:"api_key_header,omitempty"`
+	TokenURL      string            `json:"token_url,omitempty"`
+	DeviceCodeURL string            `json:"device_code_url,omitempty"`
+	ClientID      string            `json:"client_id,omitempty"`
+	Scopes        []string          `json:"scopes,omitempty"`
+	Audience      string            `json:"audience,omitempty"`
+	Env           map[string]string `json:"env,omitempty"`
+	SecretEnv     []string          `json:"secret_env,omitempty"`
 }
 
 type Store struct {
