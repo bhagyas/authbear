@@ -14,6 +14,7 @@ const (
 	AuthTypeBearer      = "bearer"
 	AuthTypeAPIKey      = "api-key"
 	AuthTypeOAuthDevice = "oauth-device"
+	AuthTypeJWTP8       = "jwt-p8"
 )
 
 type Profile struct {
@@ -27,6 +28,9 @@ type Profile struct {
 	ClientID      string            `json:"client_id,omitempty"`
 	Scopes        []string          `json:"scopes,omitempty"`
 	Audience      string            `json:"audience,omitempty"`
+	KeyID         string            `json:"key_id,omitempty"`
+	IssuerID      string            `json:"issuer_id,omitempty"`
+	JWTAudience   string            `json:"jwt_audience,omitempty"`
 	Env           map[string]string `json:"env,omitempty"`
 	SecretEnv     []string          `json:"secret_env,omitempty"`
 }
@@ -93,6 +97,14 @@ func ValidateProfile(p Profile) error {
 		}
 		if strings.TrimSpace(p.ClientID) == "" {
 			return errors.New("client_id is required for oauth-device")
+		}
+		return nil
+	case AuthTypeJWTP8:
+		if strings.TrimSpace(p.KeyID) == "" {
+			return errors.New("key_id is required for jwt-p8")
+		}
+		if strings.TrimSpace(p.IssuerID) == "" {
+			return errors.New("issuer_id is required for jwt-p8")
 		}
 		return nil
 	default:

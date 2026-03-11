@@ -12,7 +12,9 @@ It manages credentials for multiple services and stores secrets in your OS keych
   - `bearer`
   - `api-key`
   - `oauth-device` (OAuth 2.0 device authorization grant)
+  - `jwt-p8` (Apple APIs — App Store Connect, APNs, Sign in with Apple)
 - Automatic OAuth token refresh when calling APIs
+- Auto-generated short-lived JWTs for Apple APIs (no manual token rotation)
 - Built-in API caller with headers/query/body options
 - Per-profile env vars — plain config or keychain-backed secrets, exportable via `eval $(authbear env <profile>)`
 
@@ -70,6 +72,16 @@ authbear profile add my-idp \
   --scopes "openid,profile,offline_access"
 ```
 
+Apple App Store Connect example:
+
+```bash
+authbear profile add appstore \
+  --base-url https://api.appstoreconnect.apple.com \
+  --auth-type jwt-p8 \
+  --key-id XXXXXXXXXX \
+  --issuer-id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+```
+
 ### 2) Log in and store credentials in keychain
 
 ```bash
@@ -86,6 +98,18 @@ If your provider requires a confidential client secret:
 
 ```bash
 authbear login my-idp --client-secret YOUR_CLIENT_SECRET
+```
+
+For Apple `jwt-p8`, provide the downloaded `.p8` key file:
+
+```bash
+authbear login appstore --key-file ~/Downloads/AuthKey_XXXXXXXXXX.p8
+```
+
+Use `--delete-after-store` to securely remove the file from disk once the key is in keychain:
+
+```bash
+authbear login appstore --key-file ~/Downloads/AuthKey_XXXXXXXXXX.p8 --delete-after-store
 ```
 
 ### 3) Call an endpoint
@@ -127,7 +151,7 @@ authbear health github --json
 - `authbear profile list`
 - `authbear profile show <name>`
 - `authbear profile remove <name>`
-- `authbear login <name> [--client-secret ...]`
+- `authbear login <name> [--client-secret ...] [--key-file ...] [--delete-after-store]`
 - `authbear token <name>`
 - `authbear call <name> <METHOD> <path-or-url> [flags]`
 - `authbear health <name> [flags]`
@@ -168,6 +192,7 @@ Key names:
 - `profile:<name>:api-key`
 - `profile:<name>:oauth`
 - `profile:<name>:client-secret`
+- `profile:<name>:jwt-p8`
 - `profile:<name>:env:<KEY>`
 
 ## Security notes

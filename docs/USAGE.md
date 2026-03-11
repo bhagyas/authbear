@@ -12,13 +12,16 @@ Flags:
 
 - `--base-url` API base URL used by `call` when path is relative
 - `--health-path` default path used by `health` (default runtime fallback is `/health`)
-- `--auth-type` `bearer`, `api-key`, or `oauth-device`
+- `--auth-type` `bearer`, `api-key`, `oauth-device`, or `jwt-p8`
 - `--api-key-header` header name used for `api-key` auth (default `X-API-Key`)
 - `--device-code-url` OAuth device authorization endpoint
 - `--token-url` OAuth token endpoint
 - `--client-id` OAuth client id
 - `--scopes` comma-separated OAuth scopes
 - `--audience` OAuth audience (if required by provider)
+- `--key-id` Apple key ID (jwt-p8)
+- `--issuer-id` Apple issuer ID / team ID (jwt-p8)
+- `--jwt-audience` JWT audience claim (jwt-p8, default `appstoreconnect-v1`)
 - `--env KEY=VALUE` plain (non-secret) env var attached to the profile (repeatable)
 
 ## profile list / show / remove
@@ -44,8 +47,14 @@ Behavior by auth type:
 - `bearer`: prompts for bearer token (hidden input)
 - `api-key`: prompts for API key (hidden input)
 - `oauth-device`: starts device flow, prints verification URL/code, polls token endpoint, stores access and refresh token
+- `jwt-p8`: reads, validates, and stores the EC private key from `--key-file` into the OS keychain
 
 For `oauth-device`, `--client-secret` is optional and only needed by providers that require confidential clients.
+
+### jwt-p8 login flags
+
+- `--key-file <path>` path to the Apple `.p8` private key file (required for `jwt-p8`)
+- `--delete-after-store` delete the key file from disk after it has been stored in the keychain
 
 ## token
 
@@ -174,6 +183,25 @@ authbear doctor
 ```
 
 ## Common flows
+
+Apple App Store Connect (jwt-p8):
+
+```bash
+authbear profile add appstore \
+  --base-url https://api.appstoreconnect.apple.com \
+  --auth-type jwt-p8 \
+  --key-id XXXXXXXXXX \
+  --issuer-id xxxxxxxx-xxxx-xxxx-xxxx-xxxxxxxxxxxx
+
+# Store key; optionally delete from disk
+authbear login appstore --key-file ~/Downloads/AuthKey_XXXXXXXXXX.p8 --delete-after-store
+
+# JWT is generated fresh on every call (20-minute lifetime)
+authbear call appstore GET /v1/apps
+
+# Inspect the generated JWT
+authbear token appstore
+```
 
 Bearer:
 

@@ -1,5 +1,22 @@
 # Changelog
 
+## v0.1.3 — 2026-03-11
+
+### Added
+
+- **`jwt-p8` auth type** — support for Apple API authentication (App Store Connect, APNs, Sign in with Apple) using short-lived ES256 JWTs signed with a `.p8` ECDSA private key.
+  - `authbear profile add <name> --auth-type jwt-p8 --key-id <KID> --issuer-id <ISS> [--jwt-audience <AUD>]`
+  - `authbear login <name> --key-file path/to/AuthKey.p8` — validates and stores the private key in the OS keychain.
+  - `--delete-after-store` flag on `login` deletes the `.p8` file from disk after safely storing it in the keychain.
+  - `authbear call` / `authbear token` automatically generate a fresh signed JWT (20-minute lifetime) on every request — no manual token rotation required.
+  - Default JWT audience is `appstoreconnect-v1`; override with `--jwt-audience`.
+
+### Storage
+
+P8 private keys use keychain key `profile:<name>:jwt-p8`.
+
+---
+
 ## v0.1.2 — 2026-03-10
 
 ### Added

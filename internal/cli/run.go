@@ -94,13 +94,16 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 		fs.SetOutput(io.Discard)
 		baseURL := fs.String("base-url", "", "Base URL for API requests")
 		healthPath := fs.String("health-path", "", "Default health endpoint path")
-		authType := fs.String("auth-type", config.AuthTypeBearer, "Auth type: bearer|api-key|oauth-device")
+		authType := fs.String("auth-type", config.AuthTypeBearer, "Auth type: bearer|api-key|oauth-device|jwt-p8")
 		apiKeyHeader := fs.String("api-key-header", "X-API-Key", "Header name for api-key auth")
 		tokenURL := fs.String("token-url", "", "OAuth token URL")
 		deviceCodeURL := fs.String("device-code-url", "", "OAuth device code URL")
 		clientID := fs.String("client-id", "", "OAuth client ID")
 		scopes := fs.String("scopes", "", "Comma-separated OAuth scopes")
 		audience := fs.String("audience", "", "OAuth audience (optional)")
+		keyID := fs.String("key-id", "", "Apple key ID (jwt-p8)")
+		issuerID := fs.String("issuer-id", "", "Apple issuer ID (jwt-p8)")
+		jwtAud := fs.String("jwt-audience", "appstoreconnect-v1", "JWT audience (jwt-p8)")
 		var envFlags multiFlag
 		fs.Var(&envFlags, "env", "Env var in KEY=VALUE format (repeatable; for secrets use `authbear env set`)")
 		if err := fs.Parse(args[2:]); err != nil {
@@ -118,6 +121,9 @@ func runProfile(args []string, cfgPath string, s *config.Store) int {
 			DeviceCodeURL: strings.TrimSpace(*deviceCodeURL),
 			ClientID:      strings.TrimSpace(*clientID),
 			Audience:      strings.TrimSpace(*audience),
+			KeyID:         strings.TrimSpace(*keyID),
+			IssuerID:      strings.TrimSpace(*issuerID),
+			JWTAudience:   strings.TrimSpace(*jwtAud),
 		}
 		if *scopes != "" {
 			for _, item := range strings.Split(*scopes, ",") {
@@ -218,6 +224,8 @@ func runLogin(args []string, s *config.Store) int {
 	fs := flag.NewFlagSet("login", flag.ContinueOnError)
 	fs.SetOutput(io.Discard)
 	clientSecret := fs.String("client-secret", "", "OAuth client secret (optional)")
+	keyFile := fs.String("key-file", "", "Path to .p8 private key file (jwt-p8)")
+	deleteAfterStore := fs.Bool("delete-after-store", false, "Delete key file from disk after storing in keychain (jwt-p8)")
 	if err := fs.Parse(args[1:]); err != nil {
 		fmt.Fprintf(os.Stderr, "error: %v\n", err)
 		return 1
@@ -311,6 +319,34 @@ func runLogin(args []string, s *config.Store) int {
 			return 1
 		}
 		fmt.Printf("oauth token stored for %q\n", name)
+		return 0
+
+	case config.AuthTypeJWTP8:
+		if *keyFile == "" {
+			fmt.Fprintln(os.Stderr, "error: --key-file is required for jwt-p8")
+			return 1
+		}
+		pemBytes, err := os.ReadFile(*keyFile)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "error: read key file: %v\n", err)
+			return 1
+		}
+		if err := auth.ValidateP8Key(pemBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "error: invalid p8 key: %v\n", err)
+			return 1
+		}
+		if err := secret.Set(jwtP8Key(name), string(pemBytes)); err != nil {
+			fmt.Fprintf(os.Stderr, "error: %v\n", err)
+			return 1
+		}
+		if *deleteAfterStore {
+			if err := os.Remove(*keyFile); err != nil {
+				fmt.Fprintf(os.Stderr, "warning: could not delete key file: %v\n", err)
+			} else {
+				fmt.Printf("key file %q deleted from disk\n", *keyFile)
+			}
+		}
+		fmt.Printf("p8 key stored for %q\n", name)
 		return 0
 
 	default:
@@ -667,6 +703,8 @@ func runLogout(args []string, s *config.Store) int {
 	case config.AuthTypeOAuthDevice:
 		_ = secret.Delete(oauthTokenKey(name))
 		_ = secret.Delete(clientSecretKey(name))
+	case config.AuthTypeJWTP8:
+		_ = secret.Delete(jwtP8Key(name))
 	}
 	fmt.Printf("credentials removed for %q\n", name)
 	return 0
@@ -876,6 +914,21 @@ func getAuthHeaderValue(p config.Profile) (string, bool, error) {
 		}
 		return typeName + " " + stored.AccessToken, refreshed, nil
 
+	case config.AuthTypeJWTP8:
+		pemKey, err := secret.Get(jwtP8Key(p.Name))
+		if err != nil {
+			return "", false, errors.New("missing p8 key; run `authbear login <profile>`")
+		}
+		audience := p.JWTAudience
+		if audience == "" {
+			audience = "appstoreconnect-v1"
+		}
+		tok, err := auth.GenerateJWT(pemKey, p.KeyID, p.IssuerID, audience, 0)
+		if err != nil {
+			return "", false, fmt.Errorf("generate jwt: %w", err)
+		}
+		return "Bearer " + tok, false, nil
+
 	default:
 		return "", false, fmt.Errorf("unsupported auth type %q", p.AuthType)
 	}
@@ -968,6 +1021,7 @@ func bearerKey(name string) string       { return "profile:" + name + ":bearer" 
 func apiKeyKey(name string) string       { return "profile:" + name + ":api-key" }
 func oauthTokenKey(name string) string   { return "profile:" + name + ":oauth" }
 func clientSecretKey(name string) string { return "profile:" + name + ":client-secret" }
+func jwtP8Key(name string) string        { return "profile:" + name + ":jwt-p8" }
 func envKey(profile, key string) string  { return "profile:" + profile + ":env:" + key }
 
 func printRootHelp() {
@@ -1011,14 +1065,21 @@ Usage:
 Flags for add:
   --base-url         API base URL
   --health-path      Default health endpoint path
-  --auth-type        bearer|api-key|oauth-device
+  --auth-type        bearer|api-key|oauth-device|jwt-p8
   --api-key-header   Header name for api-key auth (default X-API-Key)
   --token-url        OAuth token URL (oauth-device)
   --device-code-url  OAuth device code URL (oauth-device)
   --client-id        OAuth client ID (oauth-device)
   --scopes           Comma-separated OAuth scopes
   --audience         OAuth audience (optional)
+  --key-id           Apple key ID (jwt-p8)
+  --issuer-id        Apple issuer ID / team ID (jwt-p8)
+  --jwt-audience     JWT audience claim (jwt-p8, default: appstoreconnect-v1)
   --env KEY=VALUE    Plain (non-secret) env var (repeatable)
+
+Flags for login (jwt-p8):
+  --key-file             Path to .p8 private key file
+  --delete-after-store   Delete key file from disk after storing in keychain
 `)
 }
 
