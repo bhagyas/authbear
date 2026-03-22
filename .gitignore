@@ -1,0 +1,18 @@
+# Build outputs
+/bin/
+/dist/
+*.exe
+*.test
+*.out
+
+# Go workspace
+vendor/
+
+# Local agent / IDE
+.claude/
+.cursor/
+.context/
+
+# Secrets
+.env
+.env.*
