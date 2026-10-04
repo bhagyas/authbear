@@ -274,7 +274,7 @@ func runLogin(args []string, s *config.Store) int {
 			}
 		}
 
-		hc := &http.Client{Timeout: 30 * time.Second}
+		hc := auth.NewHTTPClient(30 * time.Second)
 		device, err := auth.StartDeviceFlow(hc, p.DeviceCodeURL, p.ClientID, p.Scopes, p.Audience)
 		if err != nil {
 			fmt.Fprintf(os.Stderr, "error: %v\n", err)
@@ -457,7 +457,7 @@ func runCall(args []string, s *config.Store) int {
 		req.Header.Set("Authorization", authHeaderValue)
 	}
 
-	hc := &http.Client{Timeout: time.Duration(*timeoutSec) * time.Second}
+	hc := auth.NewHTTPClient(time.Duration(*timeoutSec) * time.Second)
 	started := time.Now()
 	resp, err := hc.Do(req)
 	if err != nil {
@@ -602,7 +602,7 @@ func runHealth(args []string, s *config.Store) int {
 		}
 	}
 
-	hc := &http.Client{Timeout: time.Duration(*timeoutSec) * time.Second}
+	hc := auth.NewHTTPClient(time.Duration(*timeoutSec) * time.Second)
 	started := time.Now()
 	resp, err := hc.Do(req)
 	latency := time.Since(started)
@@ -879,7 +879,7 @@ func getAuthHeaderValue(p config.Profile) (string, bool, error) {
 				return "", false, errors.New("oauth token expired and no refresh token available; run `authbear login <profile>`")
 			}
 			cs, _ := secret.Get(clientSecretKey(p.Name))
-			hc := &http.Client{Timeout: 30 * time.Second}
+			hc := auth.NewHTTPClient(30 * time.Second)
 			tr, err := auth.RefreshToken(hc, p.TokenURL, p.ClientID, cs, stored.RefreshToken)
 			if err != nil {
 				return "", false, err
